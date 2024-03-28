@@ -22,12 +22,8 @@ void parseLink(const Link& link, int depth);
 void readFile(std::ifstream& file, DBStruct& dbstruct, Link& link, int& rec_depth);
 Link setLink(const std::string& input, const Link& link);
 void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link);
-void depthFunctions(const std::string& html, int& count, int depthFunction = 0);
 void savingCleanHTML(const std::string& html, int& count, std::string& newHTML);
-void searchChar(const std::string& html, int& count, const int& size, const char& value);
-void searchChar(const std::string& html, int& count, const int& size, const char& value, const char& value2);
-void endHtmlTag(
-	const std::string& html, int& count, const int& size, const char& val, const char& val2, const char& val3, const char& val4);
+void endHtmlTag(const std::string& html, int& count, const int& size, const char& val, const char& val2, const char& val3, const char& val4);
 
 int main() {
 	try {
@@ -110,17 +106,17 @@ void parseLink(const Link& link, int depth) {
 
 		cleanHTML(html, links, link);
 
-		/*std::cout << "html content:" << std::endl;
+		std::cout << "html content:" << std::endl;
 		std::cout << html << std::endl;
 
-		if (depth > 0) {
+		/*if (depth > 0) {
 			std::lock_guard<std::mutex> lock(mtx);
 
 			size_t count = links.size();
 			size_t index = 0;
-			for (auto& subLink : links)
+			for (auto& sublink : links)
 			{
-				tasks.push([subLink, depth]() { parseLink(subLink, depth - 1); });
+				tasks.push([sublink, depth]() { parseLink(sublink, depth - 1); });
 			}
 			cv.notify_one();
 		}*/
@@ -253,7 +249,12 @@ void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link) {
 				}
 			}
 		} else if (html[i] == '&' && html[i + 1] == '#' && html[i + 2] >= 48 && html[i + 2] <= 57) { // &#...;
-			searchChar(html, i, sizeHTML, ';');
+			for (i; i < sizeHTML; i++) {
+				if (html[i] == ';') {
+					break;
+				}
+			}
+			//searchChar(html, i, sizeHTML, ';');
 		} else if (html[i] == '&' && html[i + 1] == 'g' && html[i + 2] == 't' && html[i + 3] == ';') { // &gt;
 			i = i + 3;
 		} else if (html[i] == '&' && html[i + 1] == 'a' && html[i + 2] == 'm' && html[i + 3] == 'p' && html[i + 4] == ';') { // &amp;
@@ -261,7 +262,7 @@ void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link) {
 		} else if (html[i] == 39 && html[i + 1] == 's') {
 			savingCleanHTML(html, i, newHTML);
 		} else if ((html[i] >= 33 && html[i] <= 47) || (html[i] >= 58 && html[i] <= 64) || (html[i] >= 91 && html[i] <= 96) ||
-				   (html[i] >= 123 && html[i] <= 127) || (html[i] >= 176 && html[i] <= 264)) {
+				   (html[i] >= 123 && html[i] <= 127) || html[i] >= 176) {
 			if (newHTML.size() >= 1) {
 				if (newHTML[newHTML.size() - 1] != ' ') {
 					newHTML = newHTML + ' ';
@@ -279,19 +280,6 @@ void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link) {
 	std::wcout.imbue(loc);
 
 	html = boost::locale::to_lower(newHTML);
-	std::cout << html << std::endl;
-}
-
-void depthFunctions(const std::string& html, int& count, int depthFunction) {
-	for (count; count < html.size(); count++) {
-		if (html[count] == '(' || html[count] == '{' || html[count] == '[') {
-			depthFunction++;
-		} else if (html[count] == ')' || html[count] == '}' || html[count] == ']') {
-			depthFunction--;
-		} else if (depthFunction == 0 && html[count] == ';') {
-			return;
-		}
-	}
 }
 
 void savingCleanHTML(const std::string& html, int& count, std::string& newHTML) {
@@ -300,22 +288,6 @@ void savingCleanHTML(const std::string& html, int& count, std::string& newHTML) 
 	} else if (newHTML.size() >= 1) {
 		if (newHTML[newHTML.size() - 1] != ' ' && (html[count] == ' ' || html[count] == '\n' || html[count] == '\t')) {
 			newHTML = newHTML + ' ';
-		}
-	}
-}
-
-void searchChar(const std::string& html, int& count, const int& size, const char& value) {
-	for (count; count < size; count++) {
-		if (html[count] == value) {
-			return;
-		}
-	}
-}
-
-void searchChar(const std::string& html, int& count, const int& size, const char& value, const char& value2) {
-	for (count; count < size; count++) {
-		if (html[count] == value || html[count] == value2) {
-			return;
 		}
 	}
 }
