@@ -163,9 +163,9 @@ void parseLink(const Link& link, int depth) {
 		// Complete: Saving to database - Сохранение в базу данных
 		if (r_link.size() == 0) {
 			savingInDatabaze(html, link, linkStr);
-			std::cout << "Saved in database link: " << linkStr << std::endl;
 			pq_work->commit();
 			pq_work = new pqxx::work(*con);
+			std::cout << "Saved in database link: " << linkStr << std::endl;
 		} else {
 			std::cout << "The link has already been saved: " << linkStr << std::endl;
 			std::this_thread::sleep_for(std::chrono::milliseconds(200));
