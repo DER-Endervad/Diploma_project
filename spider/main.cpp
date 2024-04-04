@@ -11,11 +11,15 @@
 #include <fstream>
 #include "..\\dbstruct.h"
 #include <boost/locale.hpp>
+#include <pqxx/pqxx>
 
 std::mutex mtx;
 std::condition_variable cv;
 std::queue<std::function<void()>> tasks;
 bool exitThreadPool = false;
+
+pqxx::connection* con;
+pqxx::work* pq_work;
 
 void threadPoolWorker();
 void parseLink(const Link& link, int depth);
@@ -23,7 +27,10 @@ void readFile(std::ifstream& file, DBStruct& dbstruct, Link& link, int& rec_dept
 Link setLink(const std::string& input, const Link& link);
 void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link);
 void savingCleanHTML(const std::string& html, int& count, std::string& newHTML);
-void endHtmlTag(const std::string& html, int& count, const int& size, const char& val, const char& val2, const char& val3, const char& val4);
+void endHtmlTag(
+	const std::string& html, int& count, const int& size, const char& val, const char& val2, const char& val3, const char& val4);
+void savingInDatabaze(const std::string& html, const Link& link, const std::string& linkStr);
+std::string linkToString(const Link& link);
 
 int main() {
 	try {
@@ -46,9 +53,38 @@ int main() {
 		}
 		file.close();
 
+		// Database connect
+		const std::string connectStr = dbstruct.DbstructConnection();
+		con = new pqxx::connection(connectStr);
+		if (con->is_open()) {
+			std::cout << "Opened database successfully: " << con->dbname() << std::endl;
+		}
+
+		// Create Tables
+		pq_work = new pqxx::work(*con);
+
+		const std::string tableDocuments = "CREATE TABLE IF NOT EXISTS documents ("
+										   "id SERIAL PRIMARY KEY,"
+										   "name VARCHAR(200) NOT NULL);";
+		const std::string tableWords = "CREATE TABLE IF NOT EXISTS words ("
+									   "id SERIAL PRIMARY KEY,"
+									   "name VARCHAR(60) NOT NULL,"
+									   "amount INTEGER NOT NULL);";
+		const std::string documentWords = "CREATE TABLE IF NOT EXISTS documents_words ("
+										  "id SERIAL PRIMARY KEY,"
+										  "documents INTEGER NOT NULL REFERENCES documents(id),"
+										  "words INTEGER NOT NULL REFERENCES words(id) );";
+		pq_work->exec(tableDocuments);
+		pq_work->exec(tableWords);
+		pq_work->exec(documentWords);
+		pq_work->commit();
+		pq_work = new pqxx::work(*con);
+
 		{
 			std::lock_guard<std::mutex> lock(mtx);
-			tasks.push([link, recursion_depth]() { parseLink(link, recursion_depth); });
+			tasks.push([link, recursion_depth]() {
+				parseLink(link, recursion_depth);
+			}); // Не удается передать pqxx::connection или pqxx::work в лямбду.
 			cv.notify_one();
 		}
 
@@ -63,10 +99,26 @@ int main() {
 		for (auto& t : threadPool) {
 			t.join();
 		}
+
+		pq_work->commit();
+		std::cout << "All words are saved to the database." << std::endl;
+	}
+	catch (const pqxx::sql_error& e) {
+		std::cerr << e.what() << std::endl;
+	}
+	catch (const pqxx::broken_connection& e) {
+		std::cerr << e.what() << std::endl;
+	}
+	catch (const pqxx::syntax_error& e) {
+		std::cerr << e.what() << std::endl;
+	}
+	catch (const pqxx::usage_error& e) {
+		std::cerr << e.what() << std::endl;
 	}
 	catch (const std::exception& e) {
-		std::cout << e.what() << std::endl;
+		std::cerr << e.what() << std::endl;
 	}
+
 	return 0;
 }
 
@@ -87,42 +139,61 @@ void threadPoolWorker() {
 
 void parseLink(const Link& link, int depth) {
 	try {
-
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+		std::string linkStr = linkToString(link);
+		pqxx::result r_link = pq_work->exec("SELECT name FROM documents "
+											"WHERE name = '" +
+											linkStr + "';");
 
 		std::string html = getHtmlContent(link);
 
 		if (html.size() == 0) {
-			std::cout << "Failed to get HTML Content" << std::endl;
-			return;
+			std::string errorStd = "Failed to get HTML Content: " + linkStr;
+			throw std::exception(errorStd.c_str());
 		}
 
-		// TODO: Collect more links from HTML code and add them to the parser like that - Соберите больше ссылок из HTML-кода и добавьте их
-		// в парсер следующим образом.
-
+		// Complete: Collect more links from HTML code and add them to the parser like that - Соберите больше ссылок из HTML-кода и добавьте их в парсер следующим образом.
+		// Complete: Parse HTML code here on your own - Разберите HTML-код здесь самостоятельно
 		std::vector<Link> links;
+		if (r_link.size() == 0 || depth > 1) {
+			cleanHTML(html, links, link);
+		}
 
-		// TODO: Parse HTML code here on your own - Разберите HTML-код здесь самостоятельно
+		// Complete: Saving to database - Сохранение в базу данных
+		if (r_link.size() == 0) {
+			savingInDatabaze(html, link, linkStr);
+			std::cout << "Saved in database link: " << linkStr << std::endl;
+			pq_work->commit();
+			pq_work = new pqxx::work(*con);
+		} else {
+			std::cout << "The link has already been saved: " << linkStr << std::endl;
+			std::this_thread::sleep_for(std::chrono::milliseconds(200));
+		}
 
-		cleanHTML(html, links, link);
-
-		std::cout << "html content:" << std::endl;
-		std::cout << html << std::endl;
-
-		/*if (depth > 0) {
+		if (depth > 1) {
 			std::lock_guard<std::mutex> lock(mtx);
 
 			size_t count = links.size();
 			size_t index = 0;
-			for (auto& sublink : links)
-			{
-				tasks.push([sublink, depth]() { parseLink(sublink, depth - 1); });
+			for (auto& sublink : links) {
+				tasks.push(
+					[sublink, depth]() { parseLink(sublink, depth - 1); }); // Не удается передать pqxx::connection или pqxx::work в лямбду.
 			}
 			cv.notify_one();
-		}*/
+		}
+	}
+	catch (const pqxx::data_exception& e) {
+		std::cerr << e.what() << std::endl;
+	}
+	catch (const pqxx::sql_error& e) {
+		std::cerr << e.what() << std::endl;
+	}
+	catch (const pqxx::usage_error& e) {
+		std::cerr << e.what() << std::endl;
 	}
 	catch (const std::exception& e) {
-		std::cout << e.what() << std::endl;
+		std::cerr << e.what() << std::endl;
 	}
 }
 
@@ -209,9 +280,14 @@ void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link) {
 				html[i + 6] == 'f' && html[i + 9] != '#') { // <a href="
 				i = i + 9;
 				for (i; i < sizeHTML; i++) {
-					if (html[i] == '"') {
-						this_link = setLink(linkStr, link);
-						links.push_back(this_link);
+					if (html[i] == '"' || html[i] == '#') {
+						try {
+							this_link = setLink(linkStr, link);
+							links.push_back(this_link);
+						}
+						catch (const std::exception& e) {
+							std::cout << e.what() << " - " << linkStr << std::endl;
+						}
 						linkStr.clear();
 						for (i; i < sizeHTML; i++) {
 							if (html[i] == '>') {
@@ -254,13 +330,12 @@ void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link) {
 					break;
 				}
 			}
-			//searchChar(html, i, sizeHTML, ';');
 		} else if (html[i] == '&' && html[i + 1] == 'g' && html[i + 2] == 't' && html[i + 3] == ';') { // &gt;
 			i = i + 3;
 		} else if (html[i] == '&' && html[i + 1] == 'a' && html[i + 2] == 'm' && html[i + 3] == 'p' && html[i + 4] == ';') { // &amp;
 			i = i + 4;
 		} else if (html[i] == 39 && html[i + 1] == 's') {
-			savingCleanHTML(html, i, newHTML);
+			i++;
 		} else if ((html[i] >= 33 && html[i] <= 47) || (html[i] >= 58 && html[i] <= 64) || (html[i] >= 91 && html[i] <= 96) ||
 				   (html[i] >= 123 && html[i] <= 127) || html[i] >= 176) {
 			if (newHTML.size() >= 1) {
@@ -299,4 +374,76 @@ void endHtmlTag(
 			return;
 		}
 	}
+}
+
+void savingInDatabaze(const std::string& html, const Link& link, const std::string& linkStr) {
+	int sizeHTML = html.size();
+	std::vector<std::string> words;
+	std::vector<int> amount;
+	std::string word = "";
+	std::string id_link = "", id_word = "";
+
+	pq_work->exec("INSERT INTO documents(name) VALUES('" + linkStr + "');");
+	pqxx::result r_link = pq_work->exec("SELECT id FROM documents "
+										"WHERE name = '" +
+										linkStr + "';");
+	for (auto row : r_link) {
+		for (auto field : row) {
+			id_link = field.c_str();
+		}
+	}
+
+	for (int i = 0; i < sizeHTML; i++) {
+		if (html[i] != ' ') {
+			word = word + html[i];
+		} else if (word.size() < 60) {
+			if (words.size() > 0) {
+				for (int j = 0; j < words.size(); j++) {
+					if (words[j] == word) {
+						amount[j]++;
+						break;
+					} else if (j == words.size() - 1) {
+						words.push_back(word);
+						amount.push_back(1);
+						break;
+					}
+				}
+			} else {
+				words.push_back(word);
+				amount.push_back(1);
+			}
+			word.clear();
+		}
+	}
+
+	for (int i = 0; i < words.size(); i++) {
+		std::string output = "INSERT INTO words(name, amount) "
+							 "VALUES('" +
+							 words[i] + "', " + std::to_string(amount[i]) + ");";
+		pq_work->exec(output);
+		pqxx::result r_words = pq_work->exec("SELECT id FROM words "
+											 "WHERE name = '" +
+											 words[i] + "';");
+		for (auto row : r_words) {
+			for (auto field : row) {
+				id_word = field.c_str();
+			}
+		}
+		std::string output2 = "INSERT INTO documents_Words(documents, words) "
+							  "VALUES(" +
+							  id_link + ", " + id_word + ");";
+		pq_work->exec(output2);
+	}
+	return;
+}
+
+std::string linkToString(const Link& link) {
+	std::string linkString = "";
+	if (link.protocol == ProtocolType::HTTP) {
+		linkString = "http://";
+	} else if (link.protocol == ProtocolType::HTTPS) {
+		linkString = "https://";
+	}
+	linkString = linkString + link.hostName + link.query;
+	return linkString;
 }

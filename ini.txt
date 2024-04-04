@@ -1,8 +1,8 @@
 host: localhost
 port: 5432
-dbname: my_database
-user: my_database_user
-password: my_password_123
+dbname: Diploma_project
+user: project_user
+password: project_password
 start_page: https://en.wikipedia.org/wiki/Wikipedia
-recursion_depth: 5
+recursion_depth: 2
 port_search: 8080
