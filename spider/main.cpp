@@ -18,18 +18,18 @@ std::condition_variable cv;
 std::queue<std::function<void()>> tasks;
 bool exitThreadPool = false;
 
-pqxx::connection* con;
-pqxx::work* pq_work;
+//pqxx::connection* con;
+//pqxx::work* pq_work;
 
 void threadPoolWorker();
-void parseLink(const Link& link, int depth);
+void parseLink(const Link& link, int depth, pqxx::connection* con);
 void readFile(std::ifstream& file, DBStruct& dbstruct, Link& link, int& rec_depth);
 Link setLink(const std::string& input, const Link& link);
 void cleanHTML(std::string& html, std::vector<Link>& links, const Link& link);
 void savingCleanHTML(const std::string& html, int& count, std::string& newHTML);
 void endHtmlTag(
 	const std::string& html, int& count, const int& size, const char& val, const char& val2, const char& val3, const char& val4);
-void savingInDatabaze(const std::string& html, const Link& link, const std::string& linkStr);
+void savingInDatabaze(const std::string& html, const Link& link, const std::string& linkStr, pqxx::connection* con);
 std::string linkToString(const Link& link);
 
 int main() {
@@ -55,14 +55,15 @@ int main() {
 
 		// Database connect
 		const std::string connectStr = dbstruct.DbstructConnection();
-		con = new pqxx::connection(connectStr);
+		//pqxx::connection con(connectStr);
+		pqxx::connection*  con = new pqxx::connection(connectStr);
 		if (con->is_open()) {
 			std::cout << "Opened database successfully: " << con->dbname() << std::endl;
 		}
 
 		// Create Tables
-		pq_work = new pqxx::work(*con);
-
+		//pq_work = new pqxx::work(*con);
+		pqxx::work pq_work(*con);
 		const std::string tableDocuments = "CREATE TABLE IF NOT EXISTS documents ("
 										   "id SERIAL PRIMARY KEY,"
 										   "name VARCHAR(200) NOT NULL);";
@@ -74,16 +75,15 @@ int main() {
 										  "id SERIAL PRIMARY KEY,"
 										  "documents INTEGER NOT NULL REFERENCES documents(id),"
 										  "words INTEGER NOT NULL REFERENCES words(id) );";
-		pq_work->exec(tableDocuments);
-		pq_work->exec(tableWords);
-		pq_work->exec(documentWords);
-		pq_work->commit();
-		pq_work = new pqxx::work(*con);
+		pq_work.exec(tableDocuments);
+		pq_work.exec(tableWords);
+		pq_work.exec(documentWords);
+		pq_work.commit();
+		//pq_work = new pqxx::work(*con);
 
 		{
 			std::lock_guard<std::mutex> lock(mtx);
-			tasks.push([link, recursion_depth]() {
-				parseLink(link, recursion_depth);
+			tasks.push([link, recursion_depth, con]() { parseLink(link, recursion_depth, con);
 			}); // Не удается передать pqxx::connection или pqxx::work в лямбду.
 			cv.notify_one();
 		}
@@ -100,7 +100,7 @@ int main() {
 			t.join();
 		}
 
-		pq_work->commit();
+		pq_work.commit();
 		std::cout << "All words are saved to the database." << std::endl;
 	}
 	catch (const pqxx::sql_error& e) {
@@ -137,14 +137,16 @@ void threadPoolWorker() {
 	}
 }
 
-void parseLink(const Link& link, int depth) {
+void parseLink(const Link& link, int depth, pqxx::connection* con) {
 	try {
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
 		std::string linkStr = linkToString(link);
-		pqxx::result r_link = pq_work->exec("SELECT name FROM documents "
+		pqxx::work pq_work(*con);
+		pqxx::result r_link = pq_work.exec("SELECT name FROM documents "
 											"WHERE name = '" +
 											linkStr + "';");
+		pq_work.commit();
 
 		std::string html = getHtmlContent(link);
 
@@ -162,13 +164,13 @@ void parseLink(const Link& link, int depth) {
 
 		// Complete: Saving to database - Сохранение в базу данных
 		if (r_link.size() == 0) {
-			savingInDatabaze(html, link, linkStr);
-			pq_work->commit();
-			pq_work = new pqxx::work(*con);
+			savingInDatabaze(html, link, linkStr, con);
+			//pq_work.commit();
+			//pq_work = new pqxx::work(*con);
 			std::cout << "Saved in database link: " << linkStr << std::endl;
 		} else {
 			std::cout << "The link has already been saved: " << linkStr << std::endl;
-			std::this_thread::sleep_for(std::chrono::milliseconds(200));
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		}
 
 		if (depth > 1) {
@@ -178,7 +180,7 @@ void parseLink(const Link& link, int depth) {
 			size_t index = 0;
 			for (auto& sublink : links) {
 				tasks.push(
-					[sublink, depth]() { parseLink(sublink, depth - 1); }); // Не удается передать pqxx::connection или pqxx::work в лямбду.
+					[sublink, depth, con]() { parseLink(sublink, depth - 1, con); });
 			}
 			cv.notify_one();
 		}
@@ -376,17 +378,20 @@ void endHtmlTag(
 	}
 }
 
-void savingInDatabaze(const std::string& html, const Link& link, const std::string& linkStr) {
+void savingInDatabaze(const std::string& html, const Link& link, const std::string& linkStr, pqxx::connection* con) {
 	int sizeHTML = html.size();
 	std::vector<std::string> words;
 	std::vector<int> amount;
 	std::string word = "";
 	std::string id_link = "", id_word = "";
 
-	pq_work->exec("INSERT INTO documents(name) VALUES('" + linkStr + "');");
-	pqxx::result r_link = pq_work->exec("SELECT id FROM documents "
+	pqxx::work pq_work(*con);
+	pq_work.exec("INSERT INTO documents(name) VALUES('" + linkStr + "');");
+	pqxx::result r_link = pq_work.exec("SELECT id FROM documents "
 										"WHERE name = '" +
 										linkStr + "';");
+	pq_work.commit();
+
 	for (auto row : r_link) {
 		for (auto field : row) {
 			id_link = field.c_str();
@@ -417,11 +422,12 @@ void savingInDatabaze(const std::string& html, const Link& link, const std::stri
 	}
 
 	for (int i = 0; i < words.size(); i++) {
+		pqxx::work pq_work(*con);
 		std::string output = "INSERT INTO words(name, amount) "
 							 "VALUES('" +
 							 words[i] + "', " + std::to_string(amount[i]) + ");";
-		pq_work->exec(output);
-		pqxx::result r_words = pq_work->exec("SELECT id FROM words "
+		pq_work.exec(output);
+		pqxx::result r_words = pq_work.exec("SELECT id FROM words "
 											 "WHERE name = '" +
 											 words[i] + "';");
 		for (auto row : r_words) {
@@ -432,7 +438,8 @@ void savingInDatabaze(const std::string& html, const Link& link, const std::stri
 		std::string output2 = "INSERT INTO documents_Words(documents, words) "
 							  "VALUES(" +
 							  id_link + ", " + id_word + ");";
-		pq_work->exec(output2);
+		pq_work.exec(output2);
+		pq_work.commit();
 	}
 	return;
 }
