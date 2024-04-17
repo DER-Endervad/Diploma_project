@@ -8,10 +8,8 @@
 #include <Windows.h>
 
 #include <fstream>
-#include "..\\dbstruct.h"
 
 void httpServer(tcp::acceptor& acceptor, tcp::socket& socket);
-void readFile(std::ifstream& file, DBStruct& dbstruct, unsigned short& port);
 
 int main(int argc, char* argv[])
 {
@@ -20,12 +18,18 @@ int main(int argc, char* argv[])
 
 	try
 	{
-		DBStruct dbstruct;
 		unsigned short port;
 
 		std::ifstream file("..\\ini.txt");
 		if (file.is_open()) {
-			readFile(file, dbstruct, port);
+			while (!file.eof()) {
+				std::string input;
+				file >> input;
+				if (input == "port_search:") {
+					file >> port;
+					break;
+				}
+			}
 		} else {
 			throw std::exception("File ini.txt missing");
 		}
@@ -56,24 +60,4 @@ void httpServer(tcp::acceptor& acceptor, tcp::socket& socket) {
 			std::make_shared<HttpConnection>(std::move(socket))->start();
 		httpServer(acceptor, socket);
 	});
-}
-
-void readFile(std::ifstream& file, DBStruct& dbstruct, unsigned short& port) {
-	while (!file.eof()) {
-		std::string input;
-		file >> input;
-		if (input == "host:") {
-			file >> dbstruct.db_host;		
-		} else if (input == "port:") {
-			file >> dbstruct.db_port;		
-		} else if (input == "dbname:") {
-			file >> dbstruct.db_name;
-		} else if (input == "user:") {
-			file >> dbstruct.db_user;
-		} else if (input == "password:") {
-			file >> dbstruct.db_password;
-		} else if (input == "port_search:") {
-			file >> port;
-		}
-	}
 }

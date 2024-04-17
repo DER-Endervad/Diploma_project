@@ -4,6 +4,9 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/asio.hpp>
+#include <boost/locale.hpp>
+#include "..\\dbstruct.h"
+#include <pqxx/pqxx>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -34,6 +37,8 @@ protected:
 	void createResponsePost();
 	void writeResponse();
 	void checkDeadline();
+
+	void readFile(std::ifstream& file, DBStruct& dbstruct);
 
 public:
 	HttpConnection(tcp::socket socket);
