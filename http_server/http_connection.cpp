@@ -193,10 +193,7 @@ void HttpConnection::createResponsePost() {
 						linkAmount[this_link] = linkAmount[this_link] + this_amount;
 						b_link = true;
 					}
-
-					std::cout << field.c_str() << '\t';
 				}
-				std::cout << '\n';
 			}
 		}
 
@@ -208,21 +205,23 @@ void HttpConnection::createResponsePost() {
 			amountResult.push_back(this_amount);
 		}
 
-		bool not_sorted = true;
-		while (not_sorted) {
-			not_sorted = false;
-			for (int i = 0; i < amountResult.size()-1; i++) {
-				if (amountResult[i] < amountResult[i + 1]) {
-					std::string str_swap = searchResult[i];
-					int int_swap = amountResult[i];
+		if (input_low.size() > 1) {
+			bool not_sorted = true;
+			while (not_sorted) {
+				not_sorted = false;
+				for (int i = 0; i < amountResult.size() - 1; i++) {
+					if (amountResult[i] < amountResult[i + 1]) {
+						std::string str_swap = searchResult[i];
+						int int_swap = amountResult[i];
 
-					searchResult[i] = searchResult[i + 1];
-					amountResult[i] = amountResult[i + 1];
+						searchResult[i] = searchResult[i + 1];
+						amountResult[i] = amountResult[i + 1];
 
-					searchResult[i + 1] = str_swap;
-					amountResult[i + 1] = int_swap;
+						searchResult[i + 1] = str_swap;
+						amountResult[i + 1] = int_swap;
 
-					not_sorted = true;
+						not_sorted = true;
+					}
 				}
 			}
 		}
